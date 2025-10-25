@@ -21,7 +21,7 @@ app.use("/api/samplepaper", samplePaperRoutes);
 app.use("/api/performance", performanceRoutes);
 
 app.get("/", (req, res) => {
-  res.send("✅ StudySphere AI Backend Running");
+  res.send("✅ StudySphere AI Backend (Gemini Version) Running");
 });
 
 const PORT = process.env.PORT || 5000;
