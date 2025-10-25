@@ -1,80 +1,81 @@
-// ===================== StudySphere AI (Gemini Backend - Single File) =====================
-
+// server.js
 import express from "express";
 import cors from "cors";
+import fetch from "node-fetch";
 import dotenv from "dotenv";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ---------- Gemini Setup ----------
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: process.env.MODEL || "gemini-1.5-flash" });
-
-// ---------- AI Helper ----------
-async function generateAIResponse(prompt) {
-  try {
-    const result = await model.generateContent(prompt);
-    return result.response.text();
-  } catch (error) {
-    console.error("Gemini Error:", error);
-    return "⚠️ Sorry, I couldn’t process your request right now.";
-  }
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+  console.warn("⚠️ GEMINI_API_KEY is not set in .env");
 }
 
-// ---------- ROUTES ----------
-
-// ✅ Home route
 app.get("/", (req, res) => {
-  res.send("✅ StudySphere AI Backend (Gemini Version) Running");
+  res.send("✅ CortexLuma AI backend running.");
 });
 
-// 🧠 Generate Notes
-app.post("/api/notes", async (req, res) => {
-  const { subject, chapter } = req.body;
-  const prompt = `Create detailed, simple, and exam-focused notes for ${subject}, chapter: "${chapter}". 
-Include key points, examples, and a short summary.`;
-  const notes = await generateAIResponse(prompt);
-  res.json({ notes });
+// Chat endpoint
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: "message is required" });
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+    const body = { contents: [{ parts: [{ text: message }] }] };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(502).json({ error: "Upstream API error", status: response.status, details: text });
+    }
+
+    const data = await response.json();
+    const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    return res.json({ reply, raw: data });
+  } catch (err) {
+    console.error("Chat Error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
-// 💬 Clear Doubt
-app.post("/api/doubt", async (req, res) => {
-  const { question, subject } = req.body;
-  const prompt = `You are a helpful tutor for ${subject}. Explain this in clear steps: ${question}`;
-  const answer = await generateAIResponse(prompt);
-  res.json({ answer });
+// Image generation endpoint
+app.post("/api/image", async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: "prompt is required" });
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-image:generateImage?key=${GEMINI_API_KEY}`;
+    const body = { prompt, imageConfig: { height: 512, width: 512 } };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res.status(502).json({ error: "Upstream API error", status: response.status, details: text });
+    }
+
+    const data = await response.json();
+    const imageUrl = data?.candidates?.[0]?.imageUrl || null;
+    return res.json({ url: imageUrl, raw: data });
+  } catch (err) {
+    console.error("Image Error:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 });
 
-// 🧩 Mock Test
-app.post("/api/mocktest", async (req, res) => {
-  const { subject, chapter } = req.body;
-  const prompt = `Create a 10-question mock test for ${subject}, chapter "${chapter}". 
-Include multiple-choice, short answer, and long answer questions with answers at the end.`;
-  const test = await generateAIResponse(prompt);
-  res.json({ test });
-});
-
-// 📄 Sample Paper
-app.post("/api/samplepaper", async (req, res) => {
-  const { subject } = req.body;
-  const prompt = `Generate a 50-mark model exam paper for ${subject} including short, long, and MCQs with marks.`;
-  const paper = await generateAIResponse(prompt);
-  res.json({ paper });
-});
-
-// 📊 Analyze Performance
-app.post("/api/performance", async (req, res) => {
-  const { answers, subject } = req.body;
-  const prompt = `Analyze these answers for ${subject}: ${JSON.stringify(answers)}. 
-Provide strengths, mistakes, and improvement tips.`;
-  const feedback = await generateAIResponse(prompt);
-  res.json({ feedback });
-});
-
-// ---------- Start Server ----------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
