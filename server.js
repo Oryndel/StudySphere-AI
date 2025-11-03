@@ -1,48 +1,46 @@
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
+// server.js
+import express from 'express';
+import fetch from 'node-fetch'; // or global fetch in Node 18+
+import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
+const API_KEY = process.env.FREEPIK_API_KEY;
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) console.warn("⚠️ GEMINI_API_KEY is not set!");
+if (!API_KEY) {
+  console.error('ERROR: set FREEPIK_API_KEY in environment before running.');
+  process.exit(1);
+}
 
-app.get("/", (_, res) => res.send("✅ Gemini AI backend is running."));
+app.use(express.static('public')); // put index.html in ./public
 
-app.post("/api/chat", async (req, res) => {
-  const { message } = req.body;
-  if (!message) return res.status(400).json({ error: "message is required" });
-
+// simple search proxy: /api/search?q=your+query
+app.get('/api/search', async (req, res) => {
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    const body = { contents: [{ parts: [{ text: message }] }] };
+    const q = req.query.q || '';
+    // call Freepik resources endpoint
+    const url = new URL('https://api.freepik.com/v1/resources');
+    url.searchParams.set('query', q);
+    url.searchParams.set('per_page', '20');
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    const r = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'x-freepik-api-key': API_KEY
+      }
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error("Gemini API error:", text);
-      return res.status(502).json({ error: "Upstream API error", details: text });
-    }
-
-    const data = await response.json();
-    const reply = data?.candidates?.[0]?.content?.[0]?.text || "";
-    return res.json({ reply });
-
+    const json = await r.json();
+    // forward the response to client (you can shape it if you want)
+    res.status(r.status).json(json);
   } catch (err) {
-    console.error("Server error:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error(err);
+    res.status(500).json({ error: 'proxy_error', message: err.message });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});
