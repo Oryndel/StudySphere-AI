@@ -1,7 +1,7 @@
- {
-  "name": "freepik-image-search",
+{
+  "name": "studysphere-ai",
   "version": "1.0.0",
-  "description": "A simple Node + Express app to search Freepik images safely via API proxy.",
+  "description": "Freepik API backend with single-file setup.",
   "main": "server.js",
   "type": "module",
   "scripts": {
