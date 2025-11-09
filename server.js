@@ -1,49 +1,20 @@
-// server.js
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
+// script.js
 
-dotenv.config();
+// 1. **FIREBASE CONFIGURATION** - REPLACE WITH YOUR ACTUAL VALUES
+const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    appId: "YOUR_APP_ID"
+};
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.FREEPIK_API_KEY;
+// Initialize Firebase
+const app = firebase.initializeApp(firebaseConfig);
+const db = app.firestore();
+const storage = app.storage();
+const auth = app.auth();
 
-// for resolving absolute paths (works on Render + GitHub)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ✅ serve your index.html directly (no folder needed)
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// ✅ Freepik API proxy
-app.get("/api/search", async (req, res) => {
-  try {
-    const query = req.query.q || "";
-    const url = `https://api.freepik.com/v1/resources?query=${encodeURIComponent(query)}&per_page=10`;
-
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "x-freepik-api-key": API_KEY,
-      },
-    });
-
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    console.error("Error in /api/search:", error);
-    res.status(500).json({ error: "Server error", message: error.message });
-  }
-});
-
-// ✅ fallback for all other routes
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
-
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+// **2. VERCEL BACKEND API BASE URL** - REPLACE WITH YOUR DEPLOYED VERCEL LINK
+const VERCEL_API_BASE_URL = 'https://YOUR-VERCEL-PROJECT.vercel.app'; 
+// Example: The endpoint for liking a video would be: VERCEL_API_BASE_URL + '/api/likeVideo'
