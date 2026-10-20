@@ -27,9 +27,19 @@ from pathlib import Path
 import feedparser
 import requests
 
+# Load settings from a ".env" file next to this script (if present)
+_env = Path(__file__).with_name(".env")
+if _env.exists():
+    for _line in _env.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
 # ----------------------------- CONFIG ---------------------------------
-BOT_TOKEN = os.environ.get("8875077750:AAHFZluUtFx47q9CMknNwss-JKSLc4BZZbw", "")
-CHANNEL = os.environ.get("SuddiVaahini_bot", "")
+# >>> PASTE YOUR DETAILS HERE (or use a .env file / environment variables) <<<
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8875077750:AAHFZluUtFx47q9CMknNwss-JKSLc4BZZbw")
+CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "SuddiVaahini_bot")
 
 # Edit the feeds freely. Verify each URL still works in a browser.
 FEEDS = {
@@ -114,9 +124,9 @@ log = logging.getLogger("newsbot")
 
 
 def send(text: str, preview: bool = False) -> bool:
-    if not BOT_TOKEN or not CHANNEL:
-        log.error("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL first.")
-        return False
+    if "PASTE_YOUR" in BOT_TOKEN or CHANNEL == "@your_channel_username":
+        log.error("Open newsbot.py and set BOT_TOKEN and CHANNEL first.")
+        sys.exit(1)
     r = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
         json={
