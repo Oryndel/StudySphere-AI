@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Telegram News Channel Bot
 Posts: politics, foreign affairs, national, international, state, sports,
