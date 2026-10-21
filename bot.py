@@ -6,7 +6,7 @@ weather and stock-market updates to a Telegram channel.
 
 Usage:
   python newsbot.py run        # run forever (news / weather / stocks on schedule)
-  python newsbot.py news       # fetch and post new headlines once
+  python newsbot.py news       # fetch feeds and post one headline
   python newsbot.py weather    # post weather once
   python newsbot.py stocks     # post market snapshot once
   python newsbot.py test       # send a test message
@@ -21,6 +21,7 @@ import logging
 import os
 import sys
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -102,8 +103,10 @@ def is_blocked(title: str) -> bool:
     return any(w in t for w in BLOCKED_WORDS)
 
 
-MAX_PER_CATEGORY_PER_RUN = 3      # avoids flooding the channel
-NEWS_EVERY_MIN = 20               # news check interval
+FETCH_EVERY_MIN = float(os.environ.get("FETCH_EVERY_MIN", "15"))  # how often feeds are checked
+POST_EVERY_MIN = float(os.environ.get("POST_EVERY_MIN", "5"))     # one news post every N minutes
+MAX_QUEUE_PER_CATEGORY = 6        # newest items queued per category per check
+MAX_AGE_HOURS = 24                # skip stories older than this
 STOCKS_EVERY_MIN = 60             # market snapshot interval (weekdays, market hours)
 MARKET_HOURS = (9, 16)            # local hours (set TZ env var for your timezone)
 WEATHER_TIMES = ["07:00", "18:00"]
@@ -176,7 +179,12 @@ def entry_time(e) -> float:
     return time.mktime(t) if t else 0.0
 
 
-def post_news() -> None:
+QUEUES = {c: deque(maxlen=30) for c in FEEDS}
+_rr = {"i": 0}
+
+
+def refresh_queue() -> None:
+    """Check feeds and add NEW stories to a per-category queue (nothing is sent here)."""
     seen = load_seen()
     for category, cfg in FEEDS.items():
         fresh = []
@@ -192,21 +200,38 @@ def post_news() -> None:
                     fresh.append((entry_time(e), uid, e))
         fresh.sort(key=lambda x: x[0], reverse=True)
 
-        posted = 0
-        for _, uid, e in fresh:
+        picked = []
+        for ts, uid, e in fresh:
+            if uid in seen:
+                continue
             seen.add(uid)
-            if posted >= MAX_PER_CATEGORY_PER_RUN:
-                continue  # mark as seen, but don't post (keeps channel tidy)
+            if len(picked) >= MAX_QUEUE_PER_CATEGORY:
+                continue  # remember it, but don't queue (avoids old backlog)
+            if ts and time.time() - ts > MAX_AGE_HOURS * 3600:
+                continue
             title = html.escape(e.get("title", "").strip())
             link = e.get("link", "")
             if not title or not link or is_blocked(title):
                 continue
-            msg = f"<b>{category}</b>\n\n{title}\n\n<a href=\"{html.escape(link)}\">Read more</a>  {cfg['tag']}"
-            if send(msg, preview=True):
-                posted += 1
-            time.sleep(3)  # Telegram limit ~20 msgs/min per channel
-        log.info("%s: posted %d", category, posted)
+            picked.append(
+                f"<b>{category}</b>\n\n{title}\n\n"
+                f"<a href=\"{html.escape(link)}\">Read more</a>  {cfg['tag']}"
+            )
+        for msg in reversed(picked):  # oldest first, so news flows in order
+            QUEUES[category].append(msg)
+        log.info("%s: %d queued (%d waiting)", category, len(picked), len(QUEUES[category]))
     save_seen(seen)
+
+
+def post_next() -> bool:
+    """Send ONE queued story, rotating through categories for variety."""
+    cats = list(FEEDS)
+    for _ in range(len(cats)):
+        cat = cats[_rr["i"] % len(cats)]
+        _rr["i"] += 1
+        if QUEUES[cat]:
+            return send(QUEUES[cat].popleft(), preview=True)
+    return False
 
 
 # ----------------------------- WEATHER --------------------------------
@@ -325,16 +350,20 @@ def start_keepalive_server() -> None:
 def run_forever() -> None:
     check_setup()
     start_keepalive_server()
-    last = {"news": 0.0, "stocks": 0.0}
+    last = {"fetch": 0.0, "post": 0.0, "stocks": 0.0}
     weather_done = set()
     log.info("Bot running. Ctrl+C to stop.")
     while True:
         now = time.time()
         lt = datetime.now()
         try:
-            if now - last["news"] >= NEWS_EVERY_MIN * 60:
-                post_news()
-                last["news"] = time.time()
+            if now - last["fetch"] >= FETCH_EVERY_MIN * 60:
+                refresh_queue()
+                last["fetch"] = time.time()
+
+            if now - last["post"] >= POST_EVERY_MIN * 60:
+                post_next()
+                last["post"] = time.time()
 
             if (lt.weekday() < 5 and MARKET_HOURS[0] <= lt.hour < MARKET_HOURS[1]
                     and now - last["stocks"] >= STOCKS_EVERY_MIN * 60):
@@ -347,14 +376,14 @@ def run_forever() -> None:
                 weather_done.add(key)
         except Exception as ex:
             log.exception("Loop error: %s", ex)
-        time.sleep(30)
+        time.sleep(15)
 
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "run"
     {
         "run": run_forever,
-        "news": post_news,
+        "news": lambda: (refresh_queue(), post_next()),
         "weather": post_weather,
         "stocks": post_stocks,
         "test": lambda: send("✅ News bot connected."),
