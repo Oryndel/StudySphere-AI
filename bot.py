@@ -22,7 +22,7 @@ import os
 import sys
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import feedparser
@@ -38,6 +38,18 @@ if _env.exists():
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ----------------------------- CONFIG ---------------------------------
+# All schedules use Indian time regardless of the server's timezone.
+try:
+    from zoneinfo import ZoneInfo
+    LOCAL_TZ = ZoneInfo(os.environ.get("BOT_TZ", "Asia/Kolkata"))
+except Exception:
+    LOCAL_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def now_local() -> datetime:
+    return datetime.now(LOCAL_TZ)
+
+
 # Credentials come ONLY from environment variables (never hardcode them).
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "").strip()
@@ -108,13 +120,13 @@ POST_EVERY_MIN = float(os.environ.get("POST_EVERY_MIN", "5"))     # one news pos
 MAX_QUEUE_PER_CATEGORY = 6        # newest items queued per category per check
 MAX_AGE_HOURS = 24                # skip stories older than this
 STOCKS_EVERY_MIN = 60             # market snapshot interval (weekdays, market hours)
-MARKET_HOURS = (9, 16)            # local hours (set TZ env var for your timezone)
-WEATHER_TIMES = ["07:00", "18:00"]
+MARKET_HOURS = (9, 16)            # Indian time (IST)
+WEATHER_TIMES = os.environ.get("WEATHER_TIMES", "06:30,12:30,18:30").split(",")
 
 # Weather location (Open-Meteo, no API key needed)
-WEATHER_CITY = os.environ.get("WEATHER_CITY", "New Delhi")
-WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "28.6139"))
-WEATHER_LON = float(os.environ.get("WEATHER_LON", "77.2090"))
+WEATHER_CITY = os.environ.get("WEATHER_CITY", "Bengaluru")
+WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "12.9716"))
+WEATHER_LON = float(os.environ.get("WEATHER_LON", "77.5946"))
 
 # Yahoo Finance symbols
 INDICES = {
@@ -245,6 +257,23 @@ WMO = {
 }
 
 
+def aqi_text():
+    """Air quality (US AQI) from Open-Meteo; returns None if unavailable."""
+    try:
+        r = requests.get(
+            "https://air-quality-api.open-meteo.com/v1/air-quality",
+            params={"latitude": WEATHER_LAT, "longitude": WEATHER_LON, "current": "us_aqi"},
+            timeout=20,
+        )
+        v = r.json()["current"]["us_aqi"]
+        label = ("Good" if v <= 50 else "Moderate" if v <= 100 else
+                 "Unhealthy for sensitive groups" if v <= 150 else
+                 "Unhealthy" if v <= 200 else "Very unhealthy")
+        return f"{v:.0f} ({label})"
+    except Exception:
+        return None
+
+
 def post_weather() -> None:
     r = requests.get(
         "https://api.open-meteo.com/v1/forecast",
@@ -252,24 +281,31 @@ def post_weather() -> None:
             "latitude": WEATHER_LAT, "longitude": WEATHER_LON,
             "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
                        "wind_speed_10m,weather_code",
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-            "timezone": "auto", "forecast_days": 1,
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
+                     "uv_index_max,sunrise,sunset",
+            "timezone": "Asia/Kolkata", "forecast_days": 1,
         },
         timeout=20,
     )
     r.raise_for_status()
     d = r.json()
     c, day = d["current"], d["daily"]
-    msg = (
-        f"<b>🌦 Weather – {html.escape(WEATHER_CITY)}</b>\n\n"
-        f"{WMO.get(c['weather_code'], 'N/A')}\n"
-        f"🌡 Now: {c['temperature_2m']}°C (feels {c['apparent_temperature']}°C)\n"
-        f"🔺 High {day['temperature_2m_max'][0]}°C · 🔻 Low {day['temperature_2m_min'][0]}°C\n"
-        f"💧 Humidity {c['relative_humidity_2m']}% · 💨 Wind {c['wind_speed_10m']} km/h\n"
-        f"☔ Rain chance today: {day['precipitation_probability_max'][0]}%\n\n"
-        f"#Weather"
-    )
-    send(msg)
+    lines = [
+        f"<b>🌦 Weather – {html.escape(WEATHER_CITY)}</b> · {now_local().strftime('%d %b, %I:%M %p')}",
+        "",
+        f"{WMO.get(c['weather_code'], 'N/A')}",
+        f"🌡 Now: {c['temperature_2m']}°C (feels {c['apparent_temperature']}°C)",
+        f"🔺 High {day['temperature_2m_max'][0]}°C · 🔻 Low {day['temperature_2m_min'][0]}°C",
+        f"💧 Humidity {c['relative_humidity_2m']}% · 💨 Wind {c['wind_speed_10m']} km/h",
+        f"☔ Rain chance today: {day['precipitation_probability_max'][0]}%",
+        f"☀️ UV index (max): {day['uv_index_max'][0]}",
+        f"🌅 Sunrise {day['sunrise'][0][11:16]} · 🌇 Sunset {day['sunset'][0][11:16]}",
+    ]
+    aqi = aqi_text()
+    if aqi:
+        lines.append(f"😷 Air quality: {aqi}")
+    lines += ["", "#Weather #Bengaluru"]
+    send("\n".join(lines))
 
 
 # ------------------------------ STOCKS --------------------------------
@@ -296,7 +332,7 @@ def post_stocks() -> None:
         except Exception as ex:
             log.warning("Quote failed %s: %s", sym, ex)
     if lines:
-        now = datetime.now().strftime("%d %b, %H:%M")
+        now = now_local().strftime("%d %b, %H:%M")
         send(f"<b>📈 Market Update</b> · {now}\n\n" + "\n".join(lines) + "\n\n#Stocks #Markets")
 
 
@@ -346,6 +382,19 @@ def start_keepalive_server() -> None:
            daemon=True).start()
     log.info("Keep-alive server on port %s", port)
 
+    # Ping our own public URL every 10 min so Render's free tier doesn't sleep.
+    public_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if public_url:
+        def _ping():
+            while True:
+                time.sleep(600)
+                try:
+                    requests.get(public_url, timeout=20)
+                except Exception:
+                    pass
+        Thread(target=_ping, daemon=True).start()
+        log.info("Self-ping enabled: %s", public_url)
+
 
 def run_forever() -> None:
     check_setup()
@@ -355,7 +404,7 @@ def run_forever() -> None:
     log.info("Bot running. Ctrl+C to stop.")
     while True:
         now = time.time()
-        lt = datetime.now()
+        lt = now_local()
         try:
             if now - last["fetch"] >= FETCH_EVERY_MIN * 60:
                 refresh_queue()
@@ -370,10 +419,14 @@ def run_forever() -> None:
                 post_stocks()
                 last["stocks"] = time.time()
 
-            key = (lt.date(), lt.strftime("%H:%M"))
-            if lt.strftime("%H:%M") in WEATHER_TIMES and key not in weather_done:
-                post_weather()
-                weather_done.add(key)
+            for slot in WEATHER_TIMES:
+                h, m = map(int, slot.strip().split(":"))
+                slot_dt = lt.replace(hour=h, minute=m, second=0, microsecond=0)
+                key = (lt.date(), slot)
+                # post once per slot; still posts if the bot was briefly asleep (2h grace)
+                if slot_dt <= lt < slot_dt + timedelta(hours=2) and key not in weather_done:
+                    post_weather()
+                    weather_done.add(key)
         except Exception as ex:
             log.exception("Loop error: %s", ex)
         time.sleep(15)
