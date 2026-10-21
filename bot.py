@@ -38,8 +38,8 @@ if _env.exists():
 
 # ----------------------------- CONFIG ---------------------------------
 # Credentials come ONLY from environment variables (never hardcode them).
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8875077750:AAHFZluUtFx47q9CMknNwss-JKSLc4BZZbw").strip()
-CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "@SuddiVaahini_bot").strip()
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8878339842:AAFpuY8EgDTaVHOmBUEukGNEBm701BW5FMQ").strip()
+CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "@Suddi_Vaahinin_bot").strip()
 
 # Edit the feeds freely. Verify each URL still works in a browser.
 FEEDS = {
