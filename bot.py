@@ -38,8 +38,8 @@ if _env.exists():
 
 # ----------------------------- CONFIG ---------------------------------
 # Credentials come ONLY from environment variables (never hardcode them).
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8878339842:AAFpuY8EgDTaVHOmBUEukGNEBm701BW5FMQ").strip()
-CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "@Suddi_Vaahinin_bot").strip()
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "").strip()
 
 # Edit the feeds freely. Verify each URL still works in a browser.
 FEEDS = {
@@ -91,6 +91,16 @@ FEEDS = {
         ],
     },
 }
+
+# Headlines containing these words are never posted (spam / promo filter)
+BLOCKED_WORDS = ["sponsored", "advertorial", "giveaway", "airdrop",
+                 "pump", "casino", "promo code", "subscribe now"]
+
+
+def is_blocked(title: str) -> bool:
+    t = title.lower()
+    return any(w in t for w in BLOCKED_WORDS)
+
 
 MAX_PER_CATEGORY_PER_RUN = 3      # avoids flooding the channel
 NEWS_EVERY_MIN = 20               # news check interval
@@ -189,7 +199,7 @@ def post_news() -> None:
                 continue  # mark as seen, but don't post (keeps channel tidy)
             title = html.escape(e.get("title", "").strip())
             link = e.get("link", "")
-            if not title or not link:
+            if not title or not link or is_blocked(title):
                 continue
             msg = f"<b>{category}</b>\n\n{title}\n\n<a href=\"{html.escape(link)}\">Read more</a>  {cfg['tag']}"
             if send(msg, preview=True):
@@ -279,6 +289,9 @@ def check_setup() -> None:
     if not r.ok:
         log.error("Channel %s not found. Use @username of a PUBLIC channel and add "
                   "the bot as admin with Post Messages.", CHANNEL)
+        sys.exit(1)
+    if r.json().get("result", {}).get("type") != "channel":
+        log.error("%s is not a channel. Set TELEGRAM_CHANNEL to your channel.", CHANNEL)
         sys.exit(1)
     log.info("Setup OK. Posting to %s", CHANNEL)
 
