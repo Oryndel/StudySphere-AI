@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Telegram News Channel Bot
 Posts: politics, foreign affairs, national, international, state, sports,
@@ -36,9 +37,9 @@ if _env.exists():
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
 # ----------------------------- CONFIG ---------------------------------
-# >>> PASTE YOUR DETAILS HERE (or use a .env file / environment variables) <<<
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8875077750:AAHFZluUtFx47q9CMknNwss-JKSLc4BZZbw")
-CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "SuddiVaahini_bot")
+# Credentials come ONLY from environment variables (never hardcode them).
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8875077750:AAHFZluUtFx47q9CMknNwss-JKSLc4BZZbw").strip()
+CHANNEL = os.environ.get("TELEGRAM_CHANNEL", "@SuddiVaahini_bot").strip()
 
 # Edit the feeds freely. Verify each URL still works in a browser.
 FEEDS = {
@@ -123,8 +124,8 @@ log = logging.getLogger("newsbot")
 
 
 def send(text: str, preview: bool = False) -> bool:
-    if "PASTE_YOUR" in BOT_TOKEN or CHANNEL == "@your_channel_username":
-        log.error("Open newsbot.py and set BOT_TOKEN and CHANNEL first.")
+    if not BOT_TOKEN or not CHANNEL:
+        log.error("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL environment variables.")
         sys.exit(1)
     r = requests.post(
         f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
@@ -265,7 +266,52 @@ def post_stocks() -> None:
 
 
 # ------------------------------ SCHEDULER -----------------------------
+def check_setup() -> None:
+    """Fail early with a clear message if token/channel are wrong."""
+    if not BOT_TOKEN or not CHANNEL:
+        log.error("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNEL environment variables.")
+        sys.exit(1)
+    base = f"https://api.telegram.org/bot{BOT_TOKEN}"
+    if not requests.get(f"{base}/getMe", timeout=20).ok:
+        log.error("Bot token is invalid. Check TELEGRAM_BOT_TOKEN.")
+        sys.exit(1)
+    r = requests.get(f"{base}/getChat", params={"chat_id": CHANNEL}, timeout=20)
+    if not r.ok:
+        log.error("Channel %s not found. Use @username of a PUBLIC channel and add "
+                  "the bot as admin with Post Messages.", CHANNEL)
+        sys.exit(1)
+    log.info("Setup OK. Posting to %s", CHANNEL)
+
+
+def start_keepalive_server() -> None:
+    """Tiny web server so Render 'Web Service' sees an open port (PORT env)."""
+    port = os.environ.get("PORT")
+    if not port:
+        return
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from threading import Thread
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"news bot running")
+
+        def do_HEAD(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    Thread(target=lambda: HTTPServer(("0.0.0.0", int(port)), H).serve_forever(),
+           daemon=True).start()
+    log.info("Keep-alive server on port %s", port)
+
+
 def run_forever() -> None:
+    check_setup()
+    start_keepalive_server()
     last = {"news": 0.0, "stocks": 0.0}
     weather_done = set()
     log.info("Bot running. Ctrl+C to stop.")
